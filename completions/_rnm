@@ -1,0 +1,20 @@
+#compdef rnm
+
+_arguments -s -S \
+  '(-d --dry-run)'{-d,--dry-run}'[Show planned renames]' \
+  '--disable-log[Disable file logging]' \
+  '--rollback[Execute the latest rollback script]' \
+  '--camel-case[Use camelCase]' \
+  '--pascal-case[Use PascalCase]' \
+  '--snake-case[Use snake_case]' \
+  '--screaming-snake-case[Use SCREAMING_SNAKE_CASE]' \
+  '--kebab-case[Use kebab-case]' \
+  '--install-completions=[Select completions to install or update]:completion mode:(bash fish zsh nu all detect)' \
+  '(-c --gen-config)'{-c,--gen-config}'[Generate default config]' \
+  '(-i --install)'{-i,--install}'[Install binary, man page, detected completions]' \
+  '(-r --reinstall)'{-r,--reinstall}'[Reinstall binary, man page, selected completions]' \
+  '(-u --update)'{-u,--update}'[Update changed binary, man page, selected completions]' \
+  '(-x --uninstall)'{-x,--uninstall}'[Remove binary, man page, completions]' \
+  '(-p --purge)'{-p,--purge}'[Remove binary, man page, completions, and config]' \
+  '(-h --help)'{-h,--help}'[Show manual page]' \
+  '*:directory:_files -/'

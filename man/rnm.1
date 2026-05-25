@@ -1,0 +1,283 @@
+.TH RNM 1 "2026-05-24" "rnm" "User Commands"
+.SH NAME
+rnm \- normalize file and directory names recursively
+.SH SYNOPSIS
+.B rnm
+.RI [ OPTIONS ] " TARGET_DIR"
+.SH DESCRIPTION
+.B rnm
+renames files and directories under a single
+.I TARGET_DIR
+recursively. Names are split into alphanumeric words, camel-case boundaries
+are recognized, non-alphanumeric separators are discarded, and the result is
+written using the selected case style. The default style is
+.BR kebab-case .
+File extensions are preserved as extensions and lowercased, except with
+.B screaming-snake-case
+where extensions are uppercased.
+.PP
+Directories are processed deepest first so children can be renamed before
+their parent directories. Existing targets are never overwritten. Hidden
+entries are ignored unless explicitly included via configuration.
+.PP
+The built-in exclude list skips
+.BR .git ,
+.BR LICENSE* ,
+and
+.BR README* .
+.PP
+.I TARGET_DIR
+is required unless using a maintenance or help option.
+.PP
+Options may appear before or after
+.IR TARGET_DIR .
+Use
+.B --
+to stop option processing and treat all remaining arguments as paths.
+Only one target directory is accepted.
+.PP
+Rename operations must not be run as root. Use a regular user account for
+.BR rnm .
+Maintenance options such as
+.BR --install
+and
+.BR --update
+follow the same install safety rules as documented under
+.BR Maintenance .
+.SH OPTIONS
+.SS Execution
+.TP
+.BR -d ", " --dry-run
+Show what would be renamed without changing anything.
+.TP
+.B --disable-log
+Disable file logging for this run.
+.TP
+.B --rollback
+Execute the latest rollback script and remove it after successful execution.
+.B rnm
+always writes the latest non-dry-run rename rollback to
+.I ~/.local/state/rnm/rnm-rollback.sh
+(or
+.BR XDG_STATE_HOME /rnm/rnm-rollback.sh
+when set). Each new rename replaces the previous rollback script.
+.SS Case style
+.TP
+.BR --camel-case
+Use
+.BR camelCase
+for renamed items.
+.TP
+.BR --pascal-case
+Use
+.BR PascalCase
+for renamed items.
+.TP
+.BR --snake-case
+Use
+.BR snake_case
+for renamed items.
+.TP
+.BR --screaming-snake-case
+Use
+.BR SCREAMING_SNAKE_CASE
+for renamed items.
+.TP
+.BR --kebab-case
+Use
+.BR kebab-case
+for renamed items (default).
+.SS Maintenance
+.TP
+.BR --install-completions " " MODE
+Select which shell completions are installed or updated. Valid modes are
+.BR bash ,
+.BR fish ,
+.BR zsh ,
+.BR nu ,
+.BR all ,
+and
+.BR detect .
+The default is
+.BR detect ,
+which installs completions only for shells whose binaries are detected on the
+system. Explicit shell modes and
+.B all
+install the requested completion files even if the shell binary is not present.
+When used without another maintenance action, this option installs only the
+selected completion files.
+.TP
+.BR -i ", " --install
+Install the binary, man page, and selected shell completions. Existing files are
+left unchanged.
+.TP
+.BR -r ", " --reinstall
+Replace the installed binary, man page, and selected shell completions with the
+current files.
+.TP
+.BR -u ", " --update
+Update the installed binary, man page, and selected shell completions only when
+the source and destination differ. The comparison uses
+.B cmp
+before writing, so unchanged files are skipped without copying.
+.TP
+.BR -x ", " --uninstall
+Remove the installed binary, man page, and all known shell completions.
+.TP
+.BR -p ", " --purge
+Remove the installed binary, man page, all known shell completions, and
+configuration file.
+.TP
+.BR -c ", " --gen-config
+Generate a default configuration file and exit.
+.SS Help
+.TP
+.BR -h ", " --help
+Show this manual page.
+.SH INSTALL PATHS
+.TP
+.B Binary
+.I ~/.local/bin/rnm
+.TP
+.B Man page
+.I ~/.local/share/man/man1/rnm.1
+.SH CONFIGURATION
+The configuration file is stored at:
+.PP
+.I ~/.config/rnm/config
+.PP
+Settings:
+.TP
+.B case
+Controls the case style. Valid values:
+.BR default ,
+.BR camel-case ,
+.BR pascal-case ,
+.BR snake-case ,
+.BR screaming-snake-case ,
+.BR kebab-case .
+.B default
+is an alias for
+.BR kebab-case .
+.TP
+.B disable-log
+Set to
+.BR true ,
+.BR yes ,
+or
+.B 1
+to disable file logging. Set to
+.BR false ,
+.BR no ,
+or
+.B 0
+to keep file logging enabled. If omitted, the default is
+.BR false .
+.B --gen-config
+writes this setting as
+.BR false .
+.PP
+Sections:
+.TP
+.B [exclude]
+Patterns to skip. Glob is the default; to use regex, prefix with
+.BR re: " or " regex: .
+.TP
+.B [include]
+Patterns to allow hidden paths. Glob is the default; to use regex, prefix with
+.BR re: " or " regex: .
+.PP
+Lines starting with
+.B #
+or
+.B //
+are treated as comments.
+.SH COMPLETIONS
+Shell completions are installed to:
+.TP
+.I ~/.local/share/bash-completion/completions/rnm
+.TP
+.I ~/.local/share/fish/vendor_completions.d/rnm.fish
+.TP
+.I ~/.local/share/zsh/site-functions/_rnm
+.TP
+.I ~/.config/nushell/completions/rnm.nu
+.PP
+Bash, fish, and zsh paths respect
+.BR XDG_DATA_HOME .
+Nushell completions respect
+.BR XDG_CONFIG_HOME .
+.SH CASE STYLES
+.TP
+.B camelCase
+Example:
+.I myVariableName
+.TP
+.B PascalCase
+Example:
+.I MyVariableName
+.TP
+.B snake_case
+Example:
+.I my_variable_name
+.TP
+.B SCREAMING_SNAKE_CASE
+Example:
+.I MAX_BUFFER_SIZE
+.TP
+.B kebab-case
+Example:
+.I my-variable-name
+.SH ENVIRONMENT
+.TP
+.B XDG_CONFIG_HOME
+Base directory for configuration and Nushell completion installation (defaults
+to
+.IR ~/.config ).
+Must be absolute when set.
+.TP
+.B XDG_DATA_HOME
+Base directory for man page and bash, fish, and zsh completion installation
+(defaults to
+.IR ~/.local/share ).
+Must be absolute when set.
+.TP
+.B XDG_STATE_HOME
+Base directory for logs and the latest rollback script (defaults to
+.IR ~/.local/state ).
+Must be absolute when set.
+.TP
+.B NO_COLOR
+Disable colored output when set.
+.TP
+.B RNM_SOURCE_DIR
+Optional absolute path to the source tree containing
+.IR man/
+and
+.IR completions/
+when running maintenance from an installed binary without an adjacent bundle.
+.SH EXAMPLES
+.PP
+.RS
+rnm .
+.RE
+.PP
+.RS
+rnm -d ./Downloads
+.RE
+.PP
+.RS
+rnm --install
+.RE
+.PP
+.RS
+rnm --install --install-completions=all
+.RE
+.PP
+.RS
+rnm --update --install-completions=detect
+.RE
+.PP
+.RS
+rnm --purge
+.RE
