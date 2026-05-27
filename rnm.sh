@@ -15,7 +15,6 @@ INSTALL_COMPLETIONS="detect"
 INSTALL_COMPLETIONS_FROM_CLI=0
 DISABLE_LOG=0
 DISABLE_LOG_FROM_CLI=0
-ROLLBACK_SCRIPT=""
 TARGET_DIR=""
 declare -a REQUESTED_PATHS=()
 declare -a RENAME_OLD_PATHS=()
@@ -39,6 +38,13 @@ RUN_STARTED_AT=""
 RUN_STARTED_EPOCH=""
 RUN_COMMAND=""
 LOGGING_READY=0
+RENAME_SUCCESS=0
+RENAME_SKIPPED=0
+RENAME_FAILED=0
+DRY_RUN_COUNT=0
+RENAME_ACTIVE=0
+ROLLBACK_WRITTEN=0
+SUMMARY_WRITTEN=0
 
 init_colors() {
 	if [[ -t 1 && -z ${NO_COLOR-} ]]; then
@@ -143,6 +149,14 @@ write_log_header() {
 	} >>"$LOG_FILE"
 }
 
+handle_exit() {
+	local exit_code="$1"
+	if [[ $RENAME_ACTIVE -eq 1 && $DRY_RUN -eq 0 && $ROLLBACK_WRITTEN -eq 0 && ${#RENAME_OLD_PATHS[@]} -gt 0 ]]; then
+		write_rollback_script || true
+	fi
+	write_log_footer "$exit_code"
+}
+
 write_log_footer() {
 	[[ $DISABLE_LOG -eq 0 && $LOGGING_READY -eq 1 ]] || return 0
 	local exit_code="$1"
@@ -200,14 +214,33 @@ log_warn() {
 }
 
 log_skip() {
+	RENAME_SKIPPED=$((RENAME_SKIPPED + 1))
 	log_out "Skip" "$C_SKIP" "$*"
 }
 
 log_rename() {
+	RENAME_SUCCESS=$((RENAME_SUCCESS + 1))
 	log_out "Rename" "$C_RENAME" "$*"
 }
 
+log_rename_summary() {
+	[[ $SUMMARY_WRITTEN -eq 0 ]] || return 0
+	SUMMARY_WRITTEN=1
+	if [[ $DRY_RUN -eq 1 ]]; then
+		printf 'Summary:\n  Planned: %s, Skipped: %s, Failed: %s\n' "$DRY_RUN_COUNT" "$RENAME_SKIPPED" "$RENAME_FAILED"
+		if [[ $LOGGING_READY -eq 1 ]]; then
+			printf 'Summary:\n  Planned: %s, Skipped: %s, Failed: %s\n' "$DRY_RUN_COUNT" "$RENAME_SKIPPED" "$RENAME_FAILED" >>"$LOG_FILE"
+		fi
+		return 0
+	fi
+	printf 'Summary:\n  Success: %s, Skipped: %s, Failed: %s\n' "$RENAME_SUCCESS" "$RENAME_SKIPPED" "$RENAME_FAILED"
+	if [[ $LOGGING_READY -eq 1 ]]; then
+		printf 'Summary:\n  Success: %s, Skipped: %s, Failed: %s\n' "$RENAME_SUCCESS" "$RENAME_SKIPPED" "$RENAME_FAILED" >>"$LOG_FILE"
+	fi
+}
+
 log_dry() {
+	DRY_RUN_COUNT=$((DRY_RUN_COUNT + 1))
 	log_out "Dry-run" "$C_DRY" "$*"
 }
 
@@ -952,6 +985,7 @@ install_self() {
 	install_binary "install"
 	install_man "install"
 	install_completions "install"
+	generate_config
 }
 
 reinstall_self() {
@@ -1045,7 +1079,6 @@ generate_config() {
 	fi
 
 	tmpfile="$(make_temp_file_in_dir "$config_dir" rnm.XXXXXX)"
-	trap 'rm -f "$tmpfile"' RETURN
 	printf 'case=default\ndisable-log=false\n[exclude]\n// list file(s)/folder(s) to exclude\n[include]\n// list file(s)/folder(s) to include\n' >"$tmpfile"
 	if ln "$tmpfile" "$config_path" 2>/dev/null; then
 		rm -f "$tmpfile"
@@ -1072,6 +1105,8 @@ usage() {
 Usage: $SCRIPT_NAME [OPTIONS] TARGET_DIR
 
 Recursively rename files and directories under TARGET_DIR.
+Logs: ${XDG_STATE_HOME:-$HOME/.local/state}/rnm
+Rollback: run $SCRIPT_NAME --rollback to restore the latest non-dry-run rename.
 
 Options:
   -d, --dry-run           Show renames without applying them
@@ -1212,6 +1247,36 @@ record_rename() {
 	local new_path="$2"
 	RENAME_OLD_PATHS+=("$old_path")
 	RENAME_NEW_PATHS+=("$new_path")
+	ROLLBACK_WRITTEN=0
+}
+
+make_unique_path() {
+	local candidate="$1"
+	local is_dir="$2"
+	local dir base stem ext counter
+
+	if ! path_exists "$candidate"; then
+		printf '%s\n' "$candidate"
+		return 0
+	fi
+
+	dir="$(dirname -- "$candidate")"
+	base="$(basename -- "$candidate")"
+	stem="$base"
+	ext=""
+	if [[ $is_dir -eq 0 && $base == *.* && $base != .* ]]; then
+		stem="${base%.*}"
+		ext=".${base##*.}"
+	fi
+
+	for ((counter = 1; counter <= 9999; counter++)); do
+		candidate="$dir/$stem-$counter$ext"
+		if ! path_exists "$candidate"; then
+			printf '%s\n' "$candidate"
+			return 0
+		fi
+	done
+	return 1
 }
 
 get_rollback_script_path() {
@@ -1296,24 +1361,43 @@ path_moves_away() {
 	return 1
 }
 
+success=0
+skipped=0
+failed=0
+
+print_summary() {
+	printf 'Summary:\n  Success: %s, Skipped: %s, Failed: %s\n' "$success" "$skipped" "$failed"
+}
+
 for ((i = 0; i < ${#srcs[@]}; i++)); do
 	initial_source="$(initial_source_for "${srcs[$i]}" "$i")"
-	path_exists "$initial_source" || { printf 'Rollback source missing: %s\n' "$initial_source" >&2; exit 1; }
+	if ! path_exists "$initial_source"; then
+		printf 'Rollback source missing: %s\n' "$initial_source" >&2
+		failed=1
+		print_summary
+		exit 1
+	fi
 	if path_exists "${tgts[$i]}" && ! path_moves_away "${tgts[$i]}"; then
 		printf 'Rollback target exists: %s\n' "${tgts[$i]}" >&2
+		failed=1
+		print_summary
 		exit 1
 	fi
 done
 
 for ((i = 0; i < ${#srcs[@]}; i++)); do
+	printf 'Rollback: %s -> %s\n' "${srcs[$i]}" "${tgts[$i]}"
 	mv "${srcs[$i]}" "${tgts[$i]}"
+	success=$((success + 1))
 done
+print_summary
+
 ROLLBACK_SCRIPT
 	} >"$tmpfile"
 	chmod 0700 "$tmpfile"
 	if mv -f "$tmpfile" "$rollback_path"; then
-		ROLLBACK_SCRIPT="$rollback_path"
-		log_info "Rollback script: $ROLLBACK_SCRIPT"
+		ROLLBACK_WRITTEN=1
+		log_info "Undo available: run rnm --rollback to restore the last rename."
 		return 0
 	fi
 	rm -f "$tmpfile"
@@ -1332,7 +1416,6 @@ run_rollback() {
 	validate_rollback_script "$rollback_path"
 	bash "$rollback_path"
 	rm "$rollback_path"
-	log_info "Rollback completed: $rollback_path"
 }
 
 rename_item() {
@@ -1341,13 +1424,15 @@ rename_item() {
 		return
 	fi
 
-	local dir base name ext newname newpath
+	local dir base name ext newname newpath is_dir
 	dir=$(dirname -- "$path")
 	base=$(basename -- "$path")
 
 	if [[ -d $path ]]; then
+		is_dir=1
 		newname=$(normalize "$base")
 	else
+		is_dir=0
 		if [[ $base == *.* ]]; then
 			name="${base%.*}"
 			ext="${base##*.}"
@@ -1369,8 +1454,10 @@ rename_item() {
 	fi
 
 	if path_exists "$newpath"; then
-		log_skip "Target exists: $path -> $newpath"
-		return
+		newpath="$(make_unique_path "$newpath" "$is_dir")" || {
+			log_skip "No available target name: $path -> $newpath"
+			return
+		}
 	fi
 
 	if [[ $DRY_RUN -eq 1 ]]; then
@@ -1385,16 +1472,21 @@ rename_item() {
 			return
 		fi
 		if path_exists "$newpath"; then
-			log_skip "Target exists: $path -> $newpath"
-			return
+			newpath="$(make_unique_path "$newpath" "$is_dir")" || {
+				log_skip "No available target name: $path -> $newpath"
+				return
+			}
 		fi
 	fi
 
 	if path_exists "$newpath"; then
-		log_skip "Target exists: $path -> $newpath"
-		return
+		newpath="$(make_unique_path "$newpath" "$is_dir")" || {
+			log_skip "No available target name: $path -> $newpath"
+			return
+		}
 	fi
 
+	RENAME_FAILED=$((RENAME_FAILED + 1))
 	die "Failed to rename: $path -> $newpath"
 }
 
@@ -1420,11 +1512,14 @@ run_rename() {
 	TARGET_DIR="$(cd -- "$TARGET_DIR" && pwd -P)"
 
 	load_rename_config
+	RENAME_ACTIVE=1
 
 	while IFS= read -r -d '' item; do
 		rename_item "$item"
 	done < <(find "$TARGET_DIR" -depth -print0)
 	write_rollback_script
+	RENAME_ACTIVE=0
+	log_rename_summary
 }
 
 parse_args() {
@@ -1503,7 +1598,9 @@ main() {
 	fi
 	init_logging
 	write_log_header
-	trap 'write_log_footer "$?"' EXIT
+	trap 'handle_exit "$?"' EXIT
+	trap 'exit 130' INT
+	trap 'exit 143' TERM
 	trap 'on_err "$?" "${LINENO}" "${BASH_COMMAND}"' ERR
 
 	if [[ $ACTION == "help" ]]; then

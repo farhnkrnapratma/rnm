@@ -4,6 +4,9 @@ rnm \- normalize file and directory names recursively
 .SH SYNOPSIS
 .B rnm
 .RI [ OPTIONS ] " TARGET_DIR"
+.br
+.B rnm
+.B --rollback
 .SH DESCRIPTION
 .B rnm
 renames files and directories under a single
@@ -17,8 +20,24 @@ File extensions are preserved as extensions and lowercased, except with
 where extensions are uppercased.
 .PP
 Directories are processed deepest first so children can be renamed before
-their parent directories. Existing targets are never overwritten. Hidden
-entries are ignored unless explicitly included via configuration.
+their parent directories. Existing targets are never overwritten. If a target
+name already exists,
+.B rnm
+adds a numeric suffix such as
+.B -1
+or
+.B -2
+until an available name is found. Hidden entries are ignored unless explicitly
+included via configuration.
+.PP
+After each successful non-dry-run rename operation,
+.B rnm
+writes the latest rollback script to
+.IR ~/.local/state/rnm/rnm-rollback.sh .
+Each new rename replaces the previous rollback script. Use
+.B --rollback
+to restore the latest rename set; the rollback script is removed only after a
+successful rollback.
 .PP
 The built-in exclude list skips
 .BR .git ,
@@ -264,6 +283,10 @@ rnm .
 .PP
 .RS
 rnm -d ./Downloads
+.RE
+.PP
+.RS
+rnm --rollback
 .RE
 .PP
 .RS
